@@ -9,10 +9,9 @@ function join(base, path) {
 
 class FastF1ApiService {
   constructor() {
-    // Use local prediction API for race predictions, production API for other data
-    this.baseUrl = 'https://f1-dashboard-doj4.onrender.com/api';
-    this.predictionBaseUrl = 'http://localhost:8000';
-    //this.baseUrl = BASE_URL;        // e.g. https://f1-dashboard-doj4.onrender.com/api
+    // Unified API endpoint - all endpoints (including predictions) are now in main.py
+    this.baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    // For production: https://f1-dashboard-doj4.onrender.com/api
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000;
   }
@@ -190,18 +189,17 @@ class FastF1ApiService {
     try { await this.healthCheck(); return true; } catch { return false; }
   }
 
-  // Race Prediction API
-  // Race Prediction API
+  // Race Prediction API - Now unified with main API
   async getRacePrediction(year, gpName) {
     return this.fetchWithCache(`racePrediction_${year}_${gpName}`, () => {
-      const url = new URL(join(this.predictionBaseUrl, '/api/race_predict'));
+      const url = new URL(join(this.baseUrl, '/race_predict'));
       url.searchParams.append('year', year);
       url.searchParams.append('gp_name', gpName);
       
       return fetch(url.toString()).then(async res => {
         if (!res.ok) {
           const errorData = await res.json();
-          const error = new Error(errorData.detail || `HTTP ${res.status}`);
+          const error = new Error(errorData.error || errorData.detail || `HTTP ${res.status}`);
           error.response = {
             status: res.status,
             data: errorData
