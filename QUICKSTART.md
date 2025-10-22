@@ -49,22 +49,20 @@ Once backend is deployed, update your frontend environment variable:
 
 ```bash
 # In your frontend deployment (Vercel/Render/etc.)
-REACT_APP_API_URL=https://YOUR-APP-NAME.onrender.com/api
+REACT_APP_API_URL=https://f1-dashboard-vf4u.onrender.com/api
 ```
-
-Replace `YOUR-APP-NAME` with your actual Render app name.
 
 ### Step 4: Test
 
 ```bash
 # Health check
-curl https://YOUR-APP-NAME.onrender.com/api/health
+curl https://f1-dashboard-vf4u.onrender.com/api/health
 
 # Test race prediction
-curl "https://YOUR-APP-NAME.onrender.com/api/race_predict?year=2025&gp_name=Monaco"
+curl "https://f1-dashboard-vf4u.onrender.com/api/race_predict?year=2025&gp_name=Monaco"
 
 # Test ELO rankings
-curl "https://YOUR-APP-NAME.onrender.com/api/rankings/drivers/elo?season=2024"
+curl "https://f1-dashboard-vf4u.onrender.com/api/rankings/drivers/elo?season=2024"
 ```
 
 ## Local Development
@@ -138,13 +136,13 @@ GET /api/years
 
 Visit your Render app URL and test these:
 
-1. **Health Check**: `https://YOUR-APP.onrender.com/api/health`
+1. **Health Check**: `https://f1-dashboard-vf4u.onrender.com/api/health`
    - Should return `{"status": "healthy", ...}`
 
-2. **Driver Standings**: `https://YOUR-APP.onrender.com/api/driver-standings?year=2024`
+2. **Driver Standings**: `https://f1-dashboard-vf4u.onrender.com/api/driver-standings?year=2024`
    - Should return current F1 standings
 
-3. **Race Prediction**: `https://YOUR-APP.onrender.com/api/race_predict?year=2025&gp_name=Monaco`
+3. **Race Prediction**: `https://f1-dashboard-vf4u.onrender.com/api/race_predict?year=2025&gp_name=Monaco`
    - Should return predicted race results
 
 ## Troubleshooting

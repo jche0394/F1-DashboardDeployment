@@ -10,8 +10,8 @@ function join(base, path) {
 class FastF1ApiService {
   constructor() {
     // Unified API endpoint - all endpoints (including predictions) are now in main.py
-    this.baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-    // For production: https://f1-dashboard-doj4.onrender.com/api
+    this.baseUrl = process.env.REACT_APP_API_URL || 'https://f1-dashboard-vf4u.onrender.com/api';
+    // Falls back to production URL, or use http://localhost:5000/api for local development
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000;
   }
