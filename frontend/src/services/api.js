@@ -250,14 +250,17 @@ class FastF1ApiService {
       
       return fetch(url.toString()).then(async res => {
         const text = await res.text();
+        const isHtml = text && String(text).trimStart().startsWith('<');
+        if (isHtml) {
+          const msg =
+            res.status === 404
+              ? 'Backend returned 404. The Prediction API may not be deployed, or Render\'s free tier backend may be cold-starting. Wait 30–60 seconds and try again, or redeploy the backend on Render.'
+              : !res.ok
+              ? `API returned HTML instead of JSON (HTTP ${res.status}). Check REACT_APP_API_URL points to your backend.`
+              : 'Backend returned HTML instead of JSON (often means Render is cold-starting). Wait 30–60 seconds and try again.';
+          throw new Error(msg);
+        }
         if (!res.ok) {
-          if (text.trimStart().startsWith('<')) {
-            const msg =
-              res.status === 404
-                ? 'Prediction API returned 404 (route may not be deployed). Redeploy the backend on Render with the latest code, or run the backend locally (localhost:8000) and set REACT_APP_API_URL=http://localhost:8000/api.'
-                : `API returned HTML instead of JSON (HTTP ${res.status}). Check REACT_APP_API_URL points to the backend.`;
-            throw new Error(msg);
-          }
           let errorData = {};
           try {
             errorData = JSON.parse(text);
