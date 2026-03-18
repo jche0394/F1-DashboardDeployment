@@ -75,6 +75,9 @@ export default function PointsHistoryChart() {
   useEffect(() => {
     if (!pointsData || !pointsData.pointsHistory || pointsData.pointsHistory.length === 0) return;
     
+    // Don't apply quick filter if it's set to 'custom' - let user maintain their selection
+    if (quickFilter === 'custom') return;
+    
     const finalStandings = pointsData.pointsHistory[pointsData.pointsHistory.length - 1].standings;
     
     let filteredDrivers = [];
@@ -84,7 +87,7 @@ export default function PointsHistoryChart() {
       filteredDrivers = finalStandings.slice(0, 5).map(s => s.driver);
     } else if (quickFilter === 'top10') {
       filteredDrivers = finalStandings.slice(0, 10).map(s => s.driver);
-    } else {
+    } else if (quickFilter === 'all') {
       filteredDrivers = finalStandings.map(s => s.driver);
     }
     
@@ -297,6 +300,16 @@ export default function PointsHistoryChart() {
           >
             All
           </button>
+          <button
+            onClick={() => setQuickFilter('custom')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              quickFilter === 'custom'
+                ? 'bg-purple-500 text-white shadow-lg'
+                : 'bg-white/10 text-white/70 hover:bg-white/20'
+            }`}
+          >
+            Custom
+          </button>
           
           <div className="h-4 w-px bg-white/20 mx-1"></div>
           
@@ -320,10 +333,22 @@ export default function PointsHistoryChart() {
           <span className="text-white/40 text-xs ml-2">
             {selectedDrivers.length} selected
           </span>
+          
+          {selectedDrivers.length > 0 && (
+            <button
+              onClick={() => {
+                setSelectedDrivers([]);
+                setQuickFilter('top3');
+              }}
+              className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-red-400 hover:text-red-300 text-xs transition-all border border-red-500/30 ml-2"
+            >
+              Clear All
+            </button>
+          )}
         </div>
 
-        {/* Driver Selection Pills - Only show when searching or custom */}
-        {(searchQuery || quickFilter === 'custom') && (
+        {/* Driver Selection Pills - Only show when searching */}
+        {searchQuery && (
           <div className="max-h-24 overflow-y-auto custom-scrollbar">
             <div className="flex flex-wrap gap-2">
               {(searchQuery ? filteredDriversForSearch : availableDrivers).slice(0, 20).map((driver) => {

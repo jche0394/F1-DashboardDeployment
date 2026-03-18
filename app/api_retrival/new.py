@@ -9,7 +9,10 @@ from get_deg import calculate_tire_degradation  # import your function
 # ==============================
 DB_FILE = "app/api_retrival/database/f1_data.db"
 YEAR = 2025
+import os
+os.makedirs("fastf1_cache", exist_ok=True)
 fastf1.Cache.enable_cache("fastf1_cache")
+
 
 
 # ==============================

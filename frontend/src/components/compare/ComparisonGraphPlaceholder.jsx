@@ -44,7 +44,7 @@ export default function ComparisonGraphPlaceholder({
         try {
           setLoading(true);
           
-          console.log('Fetching Elo history with years:', { selectedYear1, selectedYear2 });
+          console.log('Fetching driver Elo history with years:', { selectedYear1, selectedYear2 });
           
           // Fetch Elo history for both drivers
           const [history1Response, history2Response] = await Promise.all([
@@ -67,13 +67,44 @@ export default function ComparisonGraphPlaceholder({
             history2: history2.length 
           });
         } catch (error) {
-          console.error('Error fetching Elo history:', error);
+          console.error('Error fetching driver Elo history:', error);
+          setHistoryData({ competitor1: [], competitor2: [] });
+        } finally {
+          setLoading(false);
+        }
+      } else if (comparisonType === 'constructor-vs-constructor' && selectedConstructor1 && selectedConstructor2) {
+        try {
+          setLoading(true);
+          
+          console.log('Fetching constructor Elo history with years:', { selectedYear1, selectedYear2 });
+          
+          // Fetch Elo history for both constructors
+          const [history1Response, history2Response] = await Promise.all([
+            fetch(`http://localhost:5001/api/rankings/constructors/elo/history/${selectedConstructor1}?season=${selectedYear1}`),
+            fetch(`http://localhost:5001/api/rankings/constructors/elo/history/${selectedConstructor2}?season=${selectedYear2}`)
+          ]);
+          
+          const history1 = await history1Response.json();
+          const history2 = await history2Response.json();
+          
+          setHistoryData({
+            competitor1: history1,
+            competitor2: history2
+          });
+          
+          console.log('Constructor Elo History Data:', { 
+            year1: selectedYear1, 
+            year2: selectedYear2,
+            history1: history1.length, 
+            history2: history2.length 
+          });
+        } catch (error) {
+          console.error('Error fetching constructor Elo history:', error);
           setHistoryData({ competitor1: [], competitor2: [] });
         } finally {
           setLoading(false);
         }
       }
-      // Constructor history can be added when API endpoint is available
     };
 
     fetchEloHistory();

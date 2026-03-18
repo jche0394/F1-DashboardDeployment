@@ -1,7 +1,10 @@
 import fastf1
 import pandas as pd
+import os
 
-fastf1.Cache.enable_cache("fastf1_cache")
+CACHE_DIR = "fastf1_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 
 def load_session(year, round_num, kind):
