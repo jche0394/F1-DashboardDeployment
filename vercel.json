@@ -1,0 +1,6 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "frontend/build",
+  "framework": null,
+  "installCommand": "npm install"
+}

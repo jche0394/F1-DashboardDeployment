@@ -1,0 +1,7 @@
+{
+  "name": "f1-dashboard-deployment",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  }
+}
