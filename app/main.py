@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import sqlite3
+import traceback
 
 # Setup FastF1 cache
 os.makedirs("f1_cache", exist_ok=True)
@@ -1149,19 +1150,22 @@ def race_predict():
         # Generate predictions
         predictions_df = predict_race_positions(year, gp_name, qualifying_times)
         
-        # Format response
+        # Format response (defensive: handle NaN/missing cols)
         predictions_list = []
         for idx, row in predictions_df.iterrows():
+            q_time = row.get("QualifyingTime (s)")
+            pred_pos = row.get("PredictedRacePosition")
+            deg = row.get("AvgDegPerLap")
             predictions_list.append({
-                "position": idx + 1,
-                "driver": row["Driver"],
-                "driver_code": row["DriverCode"],
-                "qualifying_time": round(row["QualifyingTime (s)"], 3),
-                "qualifying_position": int(row["QualifyingPosition"]),
-                "predicted_race_position": int(row["PredictedRacePosition"]),
-                "tire_deg_rate": round(row["AvgDegPerLap"], 4) if pd.notna(row["AvgDegPerLap"]) else None,
-                "prediction_method": row["PredictionMethod"],
-                "constructor_name": row.get("TeamName") if pd.notna(row.get("TeamName")) else None
+                "position": int(idx) + 1,
+                "driver": str(row.get("Driver", "")),
+                "driver_code": str(row.get("DriverCode", "")),
+                "qualifying_time": round(float(q_time), 3) if pd.notna(q_time) else None,
+                "qualifying_position": int(row.get("QualifyingPosition", 0)),
+                "predicted_race_position": int(pred_pos) if pd.notna(pred_pos) else int(idx) + 1,
+                "tire_deg_rate": round(float(deg), 4) if pd.notna(deg) else None,
+                "prediction_method": str(row.get("PredictionMethod", "qualifying_only")),
+                "constructor_name": str(row.get("TeamName")) if pd.notna(row.get("TeamName")) else None
             })
         
         return jsonify({
@@ -1171,8 +1175,12 @@ def race_predict():
         })
     
     except Exception as e:
-        print(f"Error in race prediction: {e}")
-        return jsonify({"error": f"Error generating predictions: {str(e)}"}), 500
+        tb = traceback.format_exc()
+        print(f"Error in race prediction: {e}\n{tb}")
+        resp = {"error": f"Error generating predictions: {str(e)}"}
+        if os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes"):
+            resp["detail"] = tb
+        return jsonify(resp), 500
 
 # ========================================
 # 404 Handler - Return JSON so frontend doesn't get "Unexpected token '<'"
