@@ -5,9 +5,10 @@ import GPSSelector from '../components/shared/GPSSelector';
 import SyncStatus from '../components/layout/SyncStatus';
 import fastf1Api from '../services/api';
 
-// Map full EventName to short display name for UI
+// Map EventName to short display name - use country/circuit consistently (no country+city mix)
 function toDisplayName(raceName) {
   if (!raceName) return '';
+  // Prefer country/circuit names F1 commonly uses
   if (raceName.includes('Australian')) return 'Australia';
   if (raceName.includes('Chinese')) return 'China';
   if (raceName.includes('Japanese')) return 'Japan';
@@ -16,7 +17,8 @@ function toDisplayName(raceName) {
   if (raceName.includes('Miami')) return 'Miami';
   if (raceName.includes('Emilia Romagna')) return 'Emilia Romagna';
   if (raceName.includes('Monaco')) return 'Monaco';
-  if (raceName.includes('Spanish')) return 'Spain';
+  if (raceName.includes('Barcelona')) return 'Barcelona';  // Barcelona GP
+  if (raceName.includes('Spanish')) return 'Madrid';       // Spanish GP (Madrid)
   if (raceName.includes('Canadian')) return 'Canada';
   if (raceName.includes('Austrian')) return 'Austria';
   if (raceName.includes('British')) return 'Great Britain';
@@ -26,7 +28,7 @@ function toDisplayName(raceName) {
   if (raceName.includes('Italian')) return 'Italy';
   if (raceName.includes('Azerbaijan')) return 'Azerbaijan';
   if (raceName.includes('Singapore')) return 'Singapore';
-  if (raceName.includes('United States') && !raceName.includes('Miami') && !raceName.includes('Las Vegas')) return 'United States';
+  if (raceName.includes('United States') && !raceName.includes('Miami') && !raceName.includes('Las Vegas')) return 'Austin';
   if (raceName.includes('Mexico City')) return 'Mexico';
   if (raceName.includes('São Paulo')) return 'Brazil';
   if (raceName.includes('Las Vegas')) return 'Las Vegas';
@@ -35,14 +37,15 @@ function toDisplayName(raceName) {
   return raceName.replace(/ Grand Prix$/, '');
 }
 
-const SUPPORTED_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025];
+const currentYear = new Date().getFullYear();
+const SUPPORTED_YEARS = [currentYear]; // Race predictions only for current season
 
 export default function PredictionsPage() {
   const navigate = useNavigate();
   const [predictions, setPredictions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedYear, setSelectedYear] = useState(2025);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedRace, setSelectedRace] = useState(''); // API name (full EventName)
   const [availableRaces, setAvailableRaces] = useState([]); // [{ displayName, apiName }]
   const [checkingRaces, setCheckingRaces] = useState(true);
@@ -52,10 +55,24 @@ export default function PredictionsPage() {
     try {
       const data = await fastf1Api.getAvailableRaces(year);
       if (!Array.isArray(data)) return [];
-      return data.map((apiName) => ({
+      // Only use EventName format (contains "Grand Prix"); filter out Location/Country if backend returns them
+      const eventNamesOnly = data.filter((name) => name && String(name).includes('Grand Prix'));
+      const mapped = eventNamesOnly.map((apiName) => ({
         displayName: toDisplayName(apiName),
         apiName,
       }));
+      // Deduplicate by displayName; prefer EventName (contains "Grand Prix") for API calls
+      const byDisplay = new Map();
+      for (const r of mapped) {
+        const key = r.displayName?.trim() || '';
+        if (!key) continue;
+        const existing = byDisplay.get(key);
+        const isEventName = r.apiName?.includes('Grand Prix');
+        if (!existing || (isEventName && !existing.apiName?.includes('Grand Prix'))) {
+          byDisplay.set(key, r);
+        }
+      }
+      return Array.from(byDisplay.values());
     } catch (err) {
       console.error('Error fetching race calendar:', err);
       return [];
@@ -167,22 +184,6 @@ export default function PredictionsPage() {
           <p className="text-lg text-white/70">
             Machine learning race predictions based on qualifying results and tire degradation analysis
           </p>
-        </div>
-
-        {/* Year selector */}
-        <div className="mb-6 flex items-center gap-4 justify-center">
-          <span className="text-sm font-medium text-white/80">Season:</span>
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className="px-4 py-2 rounded-lg bg-white/10 text-white border border-white/20 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            {SUPPORTED_YEARS.map((y) => (
-              <option key={y} value={y} className="bg-gray-800 text-white">
-                {y}
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* Race selector */}

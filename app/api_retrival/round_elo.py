@@ -1,22 +1,34 @@
 import pandas as pd
 import session_retrival as fn
 
+def _prev_round_col(df, round):
+    """Get the previous round column (handles non-consecutive round numbers)."""
+    # Round columns are typically int or float - find the largest existing col < round
+    numeric_cols = [c for c in df.columns if isinstance(c, (int, float)) and c < round]
+    return max(numeric_cols) if numeric_cols else None
+
+
 def add_elo_rating(year, round, previous_elo, elo_type, k_modifiers, round_results):
 
 
     if len(previous_elo) == 0:
         player_elo = round_results[["DriverId", "FirstName", "LastName", "ConstructorName", "GridPosition"]]
-        player_elo[round - 1] = 1000
+        player_elo[0] = 1000  # Use 0 as initial round for new season
         new_elo_frame = player_elo
+        prev_col = 0
     else:
-        new_elo_frame = previous_elo
-    new_elo_frame[round] = new_elo_frame[round - 1]
+        new_elo_frame = previous_elo.copy()
+        prev_col = _prev_round_col(new_elo_frame, round)
+        if prev_col is None:
+            prev_col = 0
+            new_elo_frame[0] = 1000  # Fallback if no previous rounds
+    new_elo_frame[round] = new_elo_frame[prev_col]
     new_drivers_rows = check_new_drivers(round_results, previous_elo, elo_type)
     if new_drivers_rows[1] == True:
         new_elo_frame = pd.concat([new_elo_frame, new_drivers_rows[0]], ignore_index=True)
 
     
-    new_elo_frame = calculate_elo(round_results, elo_type, new_elo_frame, round, k_modifiers)
+    new_elo_frame = calculate_elo(round_results, elo_type, new_elo_frame, round, prev_col, k_modifiers)
 
 
 
@@ -25,13 +37,13 @@ def add_elo_rating(year, round, previous_elo, elo_type, k_modifiers, round_resul
 
     return new_elo_frame
 
-def calculate_elo(round_results, elo_type, new_elo_frame, round, k_modifiers):
+def calculate_elo(round_results, elo_type, new_elo_frame, round, prev_round_col, k_modifiers):
     for _, player_A in round_results[["DriverId", "RacePosition", "GridPosition", "ConstructorName"]].iterrows():
         for _, player_B in round_results[["DriverId", "RacePosition", "GridPosition", "ConstructorName"]].iterrows():
 
             
-            elo_A = new_elo_frame[new_elo_frame[elo_type] == player_A[elo_type]][round - 1].iloc[0]
-            elo_B = new_elo_frame[new_elo_frame[elo_type] == player_B[elo_type]][round - 1].iloc[0]
+            elo_A = new_elo_frame[new_elo_frame[elo_type] == player_A[elo_type]][prev_round_col].iloc[0]
+            elo_B = new_elo_frame[new_elo_frame[elo_type] == player_B[elo_type]][prev_round_col].iloc[0]
             
             
             actual_result_A = determine_actual_Result(player_A["RacePosition"],player_B["RacePosition"] )

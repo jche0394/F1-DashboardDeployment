@@ -50,21 +50,47 @@ drivers_2025 = {
 # Reverse mapping: driver code -> full name (fallback for when FastF1 doesn't provide FullName)
 driver_code_to_name = {v: k for k, v in drivers_2025.items()}
 
-# Supported year range for race predictions (FastF1 has data from ~2018)
-PREDICTION_MIN_YEAR = 2018
-PREDICTION_MAX_YEAR = 2030
+# Race predictions only supported for current season
+def get_current_year():
+    return datetime.now().year
 
 # ========================================
 # Dynamic race validation (multi-year support)
 # ========================================
+def _gp_name_matches(gp_name: str, valid_races: list) -> bool:
+    """Check if gp_name matches any valid race (exact or common variants like 'X Grand Prix')."""
+    if not gp_name or not valid_races:
+        return False
+    gp = gp_name.strip()
+    valid_set = {str(v).strip() for v in valid_races}
+    if gp in valid_set:
+        return True
+    # "Bahrain Grand Prix" matches valid "Bahrain"
+    normalized = gp.replace(" Grand Prix", "").strip()
+    if normalized in valid_set:
+        return True
+    # "Bahrain" matches valid "Bahrain Grand Prix"
+    for v in valid_set:
+        if v + " Grand Prix" == gp or v == gp:
+            return True
+    return False
+
+
 def get_valid_race_names_for_year(year: int):
-    """Fetch valid race/event names for a year from FastF1 schedule."""
+    """Fetch valid race/event names. Returns EventName only, one per round. Never Location or Country."""
     try:
         schedule = fastf1.get_event_schedule(year)
         schedule = schedule[~schedule["EventName"].str.contains("Testing", case=False, na=False)]
-        return schedule["EventName"].tolist()
+        if "RoundNumber" in schedule.columns:
+            schedule = schedule.sort_values("RoundNumber")
+            # One row per round: take EventName from first row of each round (avoids any session duplicates)
+            schedule = schedule.drop_duplicates(subset=["RoundNumber"], keep="first")
+        names = schedule["EventName"].tolist()
+        # Ensure only EventName format (excludes Location/Country if ever present)
+        return [str(n).strip() for n in names if n and "Grand Prix" in str(n)]
     except Exception:
         return []
+
 
 # ========================================
 # Database Helper Functions
@@ -108,10 +134,12 @@ def get_qualifying_times_for_prediction(year: int, gp_name: str):
             
             if pd.notna(best_time) and driver_code:
                 driver_name = row.get("FullName") if pd.notna(row.get("FullName")) else driver_code_to_name.get(driver_code, driver_code)
+                team_name = row.get("TeamName") if pd.notna(row.get("TeamName")) else None
                 qual_data.append({
                     "Driver": driver_name,
                     "DriverCode": driver_code,
-                    "QualifyingTime (s)": best_time.total_seconds()
+                    "QualifyingTime (s)": best_time.total_seconds(),
+                    "TeamName": team_name
                 })
         
         if len(qual_data) == 0:
@@ -158,6 +186,23 @@ def calculate_deg_from_session(session, is_sprint: bool):
     """Calculate degradation from a session (practice or sprint)"""
     laps = session.laps.copy()
     
+    # Build driver number/id -> abbreviation map so deg_data uses same codes as qualifying
+    driver_to_abbr = {}
+    if hasattr(session, "results") and session.results is not None and len(session.results) > 0:
+        for _, row in session.results.iterrows():
+            num = row.get("DriverNumber")
+            abbr = row.get("Abbreviation")
+            if pd.notna(num) and pd.notna(abbr):
+                driver_to_abbr[str(num)] = str(abbr)
+                driver_to_abbr[int(num)] = str(abbr)
+    
+    def to_driver_code(driver_id):
+        if driver_id in driver_to_abbr:
+            return driver_to_abbr[driver_id]
+        if str(driver_id) in driver_to_abbr:
+            return driver_to_abbr[str(driver_id)]
+        return driver_id  # fallback: already abbreviation in some FastF1 versions
+    
     if not is_sprint:
         race_compounds = ['MEDIUM', 'HARD']
         laps = laps[laps['Compound'].isin(race_compounds)]
@@ -165,11 +210,15 @@ def calculate_deg_from_session(session, is_sprint: bool):
     laps = laps[pd.notna(laps['LapTime'])]
     laps['LapTime (s)'] = laps['LapTime'].dt.total_seconds()
     
+    # Prefer DriverNumber (reliable) over Driver (may be number or abbreviation depending on FastF1 version)
+    driver_col = "DriverNumber" if "DriverNumber" in laps.columns else "Driver"
+    
     deg_data = []
     min_stint_length = 5 if is_sprint else 7
     
-    for driver in laps['Driver'].unique():
-        driver_laps = laps[laps['Driver'] == driver].copy()
+    for driver_id in laps[driver_col].unique():
+        driver_code = to_driver_code(driver_id)
+        driver_laps = laps[laps[driver_col] == driver_id].copy()
         
         for stint in driver_laps['Stint'].unique():
             stint_laps = driver_laps[driver_laps['Stint'] == stint].sort_values('LapNumber')
@@ -188,7 +237,7 @@ def calculate_deg_from_session(session, is_sprint: bool):
                     deg_per_lap = (late_laps - early_laps) / num_laps if num_laps > 0 else 0
                     
                     deg_data.append({
-                        'DriverCode': driver,
+                        'DriverCode': driver_code,
                         'DegPerLap': deg_per_lap,
                         'StintLength': len(usable_laps),
                         'Compound': stint_laps.iloc[0]['Compound'] if 'Compound' in stint_laps.columns else 'UNKNOWN'
@@ -1030,10 +1079,11 @@ def get_combined_elo_for_race(year, round_num):
 # ========================================
 @app.route('/api/available_races/<int:year>', methods=['GET'])
 def get_available_races(year):
-    """Return race/event names for the given year from FastF1 schedule."""
+    """Return race/event names for the current year from FastF1 schedule."""
     try:
-        if year < PREDICTION_MIN_YEAR or year > PREDICTION_MAX_YEAR:
-            return jsonify({"error": f"Year must be between {PREDICTION_MIN_YEAR} and {PREDICTION_MAX_YEAR}"}), 400
+        current_year = get_current_year()
+        if year != current_year:
+            return jsonify({"error": f"Race predictions are only available for the current season ({current_year})"}), 400
         races = get_valid_race_names_for_year(year)
         return jsonify(races)
     except Exception as e:
@@ -1064,10 +1114,11 @@ def race_predict():
         if not year or not gp_name:
             return jsonify({"error": "Both 'year' and 'gp_name' parameters are required"}), 400
         
-        # Validate year range
-        if year < PREDICTION_MIN_YEAR or year > PREDICTION_MAX_YEAR:
+        # Only current year supported
+        current_year = get_current_year()
+        if year != current_year:
             return jsonify({
-                "error": f"Year must be between {PREDICTION_MIN_YEAR} and {PREDICTION_MAX_YEAR}"
+                "error": f"Race predictions are only available for the current season ({current_year})"
             }), 400
         
         # Validate race name against schedule for this year
@@ -1075,7 +1126,7 @@ def race_predict():
         if not valid_races:
             return jsonify({"error": f"Could not load schedule for {year}. Year may be unsupported."}), 400
         
-        if gp_name not in valid_races:
+        if not _gp_name_matches(gp_name, valid_races):
             return jsonify({
                 "error": f"Invalid race name '{gp_name}'. Valid {year} races: {', '.join(valid_races)}"
             }), 400
@@ -1105,7 +1156,8 @@ def race_predict():
                 "qualifying_position": int(row["QualifyingPosition"]),
                 "predicted_race_position": int(row["PredictedRacePosition"]),
                 "tire_deg_rate": round(row["AvgDegPerLap"], 4) if pd.notna(row["AvgDegPerLap"]) else None,
-                "prediction_method": row["PredictionMethod"]
+                "prediction_method": row["PredictionMethod"],
+                "constructor_name": row.get("TeamName") if pd.notna(row.get("TeamName")) else None
             })
         
         return jsonify({
