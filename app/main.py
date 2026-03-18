@@ -1175,6 +1175,13 @@ def race_predict():
         return jsonify({"error": f"Error generating predictions: {str(e)}"}), 500
 
 # ========================================
+# 404 Handler - Return JSON so frontend doesn't get "Unexpected token '<'"
+# ========================================
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Not found", "path": request.path}), 404
+
+# ========================================
 # Run the Flask App
 # ========================================
 if __name__ == '__main__':

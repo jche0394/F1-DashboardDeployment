@@ -5,6 +5,27 @@ function join(base, path) {
   return `${base}/${String(path).replace(/^\/+/, '')}`;
 }
 
+async function parseJsonOrThrow(res, context = '') {
+  const text = await res.text();
+  return parseJsonFromText(text, context, res.status);
+}
+
+function parseJsonFromText(text, context = '', status = 0) {
+  if (!text) return null;
+  if (text.trimStart().startsWith('<')) {
+    throw new Error(
+      context
+        ? `${context}: Server returned HTML instead of JSON (check API URL; got ${status})`
+        : `Server returned HTML instead of JSON (check REACT_APP_API_URL; got ${status})`
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(context ? `${context}: Invalid JSON` : 'Invalid JSON response');
+  }
+}
+
 class FastF1ApiService {
   constructor() {
     // Unified API endpoint - all endpoints (including predictions) are now in main.py
@@ -30,7 +51,7 @@ class FastF1ApiService {
 
     const res = await fetch(url.toString());
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    return parseJsonOrThrow(res);
   }
 
   // Endpoints
@@ -174,7 +195,7 @@ class FastF1ApiService {
   async healthCheck() {
     const res = await fetch(join(this.baseUrl, '/health'));
     if (!res.ok) throw new Error('Health check failed');
-    return res.json();
+    return parseJsonOrThrow(res, 'health');
   }
 
   clearCache() { this.cache.clear(); }
@@ -194,7 +215,7 @@ class FastF1ApiService {
   async getAvailableRaces(year) {
     const url = join(this.baseUrl, `available_races/${year}`);
     const res = await fetch(`${url}?_t=${Date.now()}`, { cache: 'no-store' });
-    if (res.ok) return res.json();
+    if (res.ok) return parseJsonOrThrow(res, 'available_races');
 
     if (res.status === 404) {
       // Fallback: use season-schedule (works on Render when available_races is not deployed)
@@ -207,7 +228,16 @@ class FastF1ApiService {
       }
     }
 
-    const err = await res.json().catch(() => ({}));
+    const text = await res.text();
+    if (text.trimStart().startsWith('<')) {
+      throw new Error(
+        'API returned HTML instead of JSON. Check REACT_APP_API_URL points to the backend (e.g. https://f1-dashboard-vf4u.onrender.com/api).'
+      );
+    }
+    let err = {};
+    try {
+      err = JSON.parse(text);
+    } catch {}
     throw new Error(err.error || `HTTP ${res.status}`);
   }
 
@@ -219,16 +249,24 @@ class FastF1ApiService {
       url.searchParams.append('gp_name', gpName);
       
       return fetch(url.toString()).then(async res => {
+        const text = await res.text();
         if (!res.ok) {
-          const errorData = await res.json();
+          if (text.trimStart().startsWith('<')) {
+            const msg =
+              res.status === 404
+                ? 'Prediction API returned 404 (route may not be deployed). Redeploy the backend on Render with the latest code, or run the backend locally (localhost:8000) and set REACT_APP_API_URL=http://localhost:8000/api.'
+                : `API returned HTML instead of JSON (HTTP ${res.status}). Check REACT_APP_API_URL points to the backend.`;
+            throw new Error(msg);
+          }
+          let errorData = {};
+          try {
+            errorData = JSON.parse(text);
+          } catch {}
           const error = new Error(errorData.error || errorData.detail || `HTTP ${res.status}`);
-          error.response = {
-            status: res.status,
-            data: errorData
-          };
+          error.response = { status: res.status, data: errorData };
           throw error;
         }
-        return res.json();
+        return parseJsonFromText(text, 'race_predict');
       });
     });
   }
