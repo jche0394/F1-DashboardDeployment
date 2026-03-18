@@ -339,7 +339,7 @@ def health_check():
         'endpoints': {
             'ergast': ['/api/driver-standings', '/api/constructor-standings', '/api/season-schedule'],
             'database': ['/api/drivers', '/api/rankings/drivers/elo', '/api/comparisons'],
-            'predictions': ['/api/race_predict']
+            'predictions': ['/api/available_races/<year>', '/api/race_predict']
         }
     })
 

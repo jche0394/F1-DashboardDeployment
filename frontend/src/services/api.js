@@ -190,14 +190,25 @@ class FastF1ApiService {
   }
 
   // Available races for a given year (multi-year support)
+  // Falls back to season-schedule if available_races returns 404 (e.g. older Render deployment)
   async getAvailableRaces(year) {
     const url = join(this.baseUrl, `available_races/${year}`);
     const res = await fetch(`${url}?_t=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}`);
+    if (res.ok) return res.json();
+
+    if (res.status === 404) {
+      // Fallback: use season-schedule (works on Render when available_races is not deployed)
+      try {
+        const scheduleData = await this.getSeasonSchedule(String(year));
+        const races = scheduleData?.MRData?.RaceTable?.Races || [];
+        return races.map((r) => r.raceName).filter(Boolean);
+      } catch (fallbackErr) {
+        console.warn('available_races 404 and season-schedule fallback failed:', fallbackErr);
+      }
     }
-    return res.json();
+
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
   }
 
   // Race Prediction API - Now unified with main API
