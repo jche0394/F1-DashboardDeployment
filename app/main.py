@@ -329,11 +329,15 @@ def predict_race_positions(year: int, gp_name: str, qualifying_times: pd.DataFra
 # ========================================
 # Health Check
 # ========================================
+# Build identifier - increment when deploying; verify at /api/health to confirm latest code is live
+API_BUILD_ID = '2026-03-predictions'
+
 @app.route('/', methods=['GET'])
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({
         'status': 'healthy',
+        'build': API_BUILD_ID,
         'timestamp': datetime.now().isoformat(),
         'message': 'F1 Dashboard API - Combined Backend',
         'endpoints': {

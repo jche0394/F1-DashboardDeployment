@@ -1,0 +1,10 @@
+# Render Blueprint - Backend API
+# Deploys the Flask backend from repo root (app/, Procfile, requirements.txt)
+services:
+  - type: web
+    name: f1-dashboard-backend
+    runtime: python
+    # Root: repo root - DO NOT set rootDir; app/ and Procfile are at root
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app
+    healthCheckPath: /api/health
