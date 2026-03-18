@@ -18,7 +18,7 @@ export default function RankingsPage() {
   useEffect(() => {
     const fetchAvailableYears = async () => {
       try {
-        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/years`);
+        const response = await fetch(`${fastf1Api.baseUrl.replace(/\/+$/, '')}/years`);
         const years = await response.json();
         setAvailableYears(years);
         // Set the latest year as default
