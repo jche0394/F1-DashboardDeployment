@@ -5,11 +5,13 @@ import PredictionsPage from "./pages/PredictionsPage";
 import RankingsPage from "./pages/RankingsPage";
 import ComparePage from "./pages/ComparePage";
 import Navbar from "./components/layout/Navbar";
+import RenderNoticeModal from "./components/shared/RenderNoticeModal";
 
 export default function App() {
   return (
     <Router>
       <div className="min-h-screen bg-black font-sans">
+        <RenderNoticeModal />
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           
