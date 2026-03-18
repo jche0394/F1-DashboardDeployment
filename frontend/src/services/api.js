@@ -29,7 +29,7 @@ function parseJsonFromText(text, context = '', status = 0) {
 class FastF1ApiService {
   constructor() {
     // Unified API endpoint - all endpoints (including predictions) are now in main.py
-    this.baseUrl = process.env.REACT_APP_API_URL || 'https://f1-dashboard-vf4u.onrender.com/api';
+    this.baseUrl = process.env.REACT_APP_API_URL || 'https://f1-dashboarddeployment.onrender.com/api';
     // Set REACT_APP_API_URL=http://localhost:5000/api for local backend development
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000;
@@ -231,7 +231,7 @@ class FastF1ApiService {
     const text = await res.text();
     if (text.trimStart().startsWith('<')) {
       throw new Error(
-        'API returned HTML instead of JSON. Check REACT_APP_API_URL points to the backend (e.g. https://f1-dashboard-vf4u.onrender.com/api).'
+        'API returned HTML instead of JSON. Check REACT_APP_API_URL points to the backend (e.g. https://f1-dashboarddeployment.onrender.com/api).'
       );
     }
     let err = {};
