@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import YearSelector from '../components/rankings/YearSelector';
+import fastf1Api from '../services/api';
 import DriverRankingsCard from '../components/rankings/DriverRankingsCard';
 import CombinedRankingsCard from '../components/rankings/CombinedRankingsCard';
 import SyncStatus from '../components/layout/SyncStatus';
@@ -17,7 +18,7 @@ export default function RankingsPage() {
   useEffect(() => {
     const fetchAvailableYears = async () => {
       try {
-        const response = await fetch('http://localhost:5001/api/years');
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/years`);
         const years = await response.json();
         setAvailableYears(years);
         // Set the latest year as default
@@ -44,12 +45,13 @@ export default function RankingsPage() {
         const yearParam = `?season=${selectedYear}`;
         
         // Fetch driver Elo rankings
-        const driverResponse = await fetch(`http://localhost:5001/api/rankings/drivers/elo${yearParam}`);
+        const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
+        const driverResponse = await fetch(`${baseUrl}/rankings/drivers/elo${yearParam}`);
         const driverData = await driverResponse.json();
         setDriverRankings(driverData.slice(0, 20)); // Top 20 drivers
         
         // Fetch combined rankings
-        const combinedResponse = await fetch(`http://localhost:5001/api/rankings/combined${yearParam}`);
+        const combinedResponse = await fetch(`${baseUrl}/rankings/combined${yearParam}`);
         const combinedData = await combinedResponse.json();
         setCombinedRankings(combinedData.slice(0, 20)); // Top 20 combined
         

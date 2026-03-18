@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import fastf1Api from '../../services/api';
 
 export default function ComparisonSummaryStats({
   comparisonType,
@@ -18,10 +19,11 @@ export default function ComparisonSummaryStats({
 
   useEffect(() => {
     const fetchComparisonData = async () => {
+      const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
       if (comparisonType === 'driver-vs-driver' && selectedDriver1 && selectedDriver2) {
         try {
           setLoading(true);
-          const response = await fetch(`http://localhost:5001/api/drivers/compare/${selectedDriver1}/${selectedDriver2}`);
+          const response = await fetch(`${baseUrl}/drivers/compare/${selectedDriver1}/${selectedDriver2}`);
           const data = await response.json();
           setComparisonData(data);
         } catch (error) {
@@ -33,7 +35,7 @@ export default function ComparisonSummaryStats({
       } else if (comparisonType === 'constructor-vs-constructor' && selectedConstructor1 && selectedConstructor2) {
         try {
           setLoading(true);
-          const response = await fetch(`http://localhost:5001/api/constructors/compare/${selectedConstructor1}/${selectedConstructor2}`);
+          const response = await fetch(`${baseUrl}/constructors/compare/${selectedConstructor1}/${selectedConstructor2}`);
           const data = await response.json();
           setComparisonData(data);
         } catch (error) {

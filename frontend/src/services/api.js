@@ -10,8 +10,8 @@ function join(base, path) {
 class FastF1ApiService {
   constructor() {
     // Unified API endpoint - all endpoints (including predictions) are now in main.py
-    this.baseUrl = process.env.REACT_APP_API_URL || 'https://f1-dashboard-vf4u.onrender.com/api';
-    // Falls back to production URL, or use http://localhost:5000/api for local development
+    this.baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    // Falls back to localhost for dev, or set REACT_APP_API_URL for production (e.g. https://...onrender.com/api)
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000;
   }
@@ -187,6 +187,17 @@ class FastF1ApiService {
 
   async isAvailable() {
     try { await this.healthCheck(); return true; } catch { return false; }
+  }
+
+  // Available races for a given year (multi-year support)
+  async getAvailableRaces(year) {
+    const url = join(this.baseUrl, `available_races/${year}`);
+    const res = await fetch(url);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
   }
 
   // Race Prediction API - Now unified with main API

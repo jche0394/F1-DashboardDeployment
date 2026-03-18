@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import ToggleSwitch from '../shared/ToggleSwitch';
+import fastf1Api from '../../services/api';
 import SearchableSelector from '../shared/SearchableSelector';
 import YearSelector from '../shared/YearSelector';
 import SectionHeader from '../shared/SectionHeader';
@@ -44,11 +45,12 @@ export default function FilterModal({
   useEffect(() => {
     const fetchDataForYear1 = async () => {
       try {
-        const driverResponse = await fetch(`http://localhost:5001/api/rankings/drivers/elo?season=${selectedYear1}`);
+        const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
+        const driverResponse = await fetch(`${baseUrl}/rankings/drivers/elo?season=${selectedYear1}`);
         const driverData = await driverResponse.json();
         setDrivers1(driverData.slice(0, 50));
 
-        const combinedResponse = await fetch(`http://localhost:5001/api/rankings/combined?season=${selectedYear1}`);
+        const combinedResponse = await fetch(`${baseUrl}/rankings/combined?season=${selectedYear1}`);
         const combinedData = await combinedResponse.json();
         const uniqueConstructors = combinedData.reduce((acc, entry) => {
           if (!acc.find(c => c.constructor_id === entry.constructor_id)) {
@@ -72,11 +74,12 @@ export default function FilterModal({
   useEffect(() => {
     const fetchDataForYear2 = async () => {
       try {
-        const driverResponse = await fetch(`http://localhost:5001/api/rankings/drivers/elo?season=${selectedYear2}`);
+        const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
+        const driverResponse = await fetch(`${baseUrl}/rankings/drivers/elo?season=${selectedYear2}`);
         const driverData = await driverResponse.json();
         setDrivers2(driverData.slice(0, 50));
 
-        const combinedResponse = await fetch(`http://localhost:5001/api/rankings/combined?season=${selectedYear2}`);
+        const combinedResponse = await fetch(`${baseUrl}/rankings/combined?season=${selectedYear2}`);
         const combinedData = await combinedResponse.json();
         const uniqueConstructors = combinedData.reduce((acc, entry) => {
           if (!acc.find(c => c.constructor_id === entry.constructor_id)) {

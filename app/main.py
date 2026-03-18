@@ -47,16 +47,24 @@ drivers_2025 = {
     "Liam Lawson": "LAW"
 }
 
-# Reverse mapping for driver code to full name
+# Reverse mapping: driver code -> full name (fallback for when FastF1 doesn't provide FullName)
 driver_code_to_name = {v: k for k, v in drivers_2025.items()}
 
-# Valid 2025 F1 race names
-valid_races_2025 = [
-    'Bahrain', 'Saudi Arabia', 'Australia', 'Japan', 'China', 'Miami', 
-    'Emilia Romagna', 'Monaco', 'Canada', 'Spain', 'Austria', 'Great Britain',
-    'Hungary', 'Belgium', 'Netherlands', 'Italy', 'Azerbaijan', 'Singapore',
-    'United States', 'Mexico', 'Brazil', 'Qatar', 'Abu Dhabi'
-]
+# Supported year range for race predictions (FastF1 has data from ~2018)
+PREDICTION_MIN_YEAR = 2018
+PREDICTION_MAX_YEAR = 2030
+
+# ========================================
+# Dynamic race validation (multi-year support)
+# ========================================
+def get_valid_race_names_for_year(year: int):
+    """Fetch valid race/event names for a year from FastF1 schedule."""
+    try:
+        schedule = fastf1.get_event_schedule(year)
+        schedule = schedule[~schedule["EventName"].str.contains("Testing", case=False, na=False)]
+        return schedule["EventName"].tolist()
+    except Exception:
+        return []
 
 # ========================================
 # Database Helper Functions
@@ -99,7 +107,7 @@ def get_qualifying_times_for_prediction(year: int, gp_name: str):
             best_time = q3_time if pd.notna(q3_time) else (q2_time if pd.notna(q2_time) else q1_time)
             
             if pd.notna(best_time) and driver_code:
-                driver_name = driver_code_to_name.get(driver_code, driver_code)
+                driver_name = row.get("FullName") if pd.notna(row.get("FullName")) else driver_code_to_name.get(driver_code, driver_code)
                 qual_data.append({
                     "Driver": driver_name,
                     "DriverCode": driver_code,
@@ -1018,6 +1026,20 @@ def get_combined_elo_for_race(year, round_num):
         return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
 
 # ========================================
+# Available Races (multi-year)
+# ========================================
+@app.route('/api/available_races/<int:year>', methods=['GET'])
+def get_available_races(year):
+    """Return race/event names for the given year from FastF1 schedule."""
+    try:
+        if year < PREDICTION_MIN_YEAR or year > PREDICTION_MAX_YEAR:
+            return jsonify({"error": f"Year must be between {PREDICTION_MIN_YEAR} and {PREDICTION_MAX_YEAR}"}), 400
+        races = get_valid_race_names_for_year(year)
+        return jsonify(races)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ========================================
 # Race Prediction Endpoints (from predict_race.py)
 # ========================================
 @app.route('/api/race_predict', methods=['GET'])
@@ -1042,10 +1064,20 @@ def race_predict():
         if not year or not gp_name:
             return jsonify({"error": "Both 'year' and 'gp_name' parameters are required"}), 400
         
-        # Validate race name
-        if gp_name not in valid_races_2025:
+        # Validate year range
+        if year < PREDICTION_MIN_YEAR or year > PREDICTION_MAX_YEAR:
             return jsonify({
-                "error": f"Invalid race name '{gp_name}'. Valid 2025 races: {', '.join(valid_races_2025)}"
+                "error": f"Year must be between {PREDICTION_MIN_YEAR} and {PREDICTION_MAX_YEAR}"
+            }), 400
+        
+        # Validate race name against schedule for this year
+        valid_races = get_valid_race_names_for_year(year)
+        if not valid_races:
+            return jsonify({"error": f"Could not load schedule for {year}. Year may be unsupported."}), 400
+        
+        if gp_name not in valid_races:
+            return jsonify({
+                "error": f"Invalid race name '{gp_name}'. Valid {year} races: {', '.join(valid_races)}"
             }), 400
         
         # Fetch qualifying times

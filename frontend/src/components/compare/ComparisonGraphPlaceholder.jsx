@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
+import fastf1Api from '../../services/api';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -47,9 +48,10 @@ export default function ComparisonGraphPlaceholder({
           console.log('Fetching driver Elo history with years:', { selectedYear1, selectedYear2 });
           
           // Fetch Elo history for both drivers
+          const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
           const [history1Response, history2Response] = await Promise.all([
-            fetch(`http://localhost:5001/api/rankings/drivers/elo/history/${selectedDriver1}?season=${selectedYear1}`),
-            fetch(`http://localhost:5001/api/rankings/drivers/elo/history/${selectedDriver2}?season=${selectedYear2}`)
+            fetch(`${baseUrl}/rankings/drivers/elo/history/${selectedDriver1}?season=${selectedYear1}`),
+            fetch(`${baseUrl}/rankings/drivers/elo/history/${selectedDriver2}?season=${selectedYear2}`)
           ]);
           
           const history1 = await history1Response.json();
@@ -79,9 +81,10 @@ export default function ComparisonGraphPlaceholder({
           console.log('Fetching constructor Elo history with years:', { selectedYear1, selectedYear2 });
           
           // Fetch Elo history for both constructors
+          const baseUrl = fastf1Api.baseUrl.replace(/\/+$/, '');
           const [history1Response, history2Response] = await Promise.all([
-            fetch(`http://localhost:5001/api/rankings/constructors/elo/history/${selectedConstructor1}?season=${selectedYear1}`),
-            fetch(`http://localhost:5001/api/rankings/constructors/elo/history/${selectedConstructor2}?season=${selectedYear2}`)
+            fetch(`${baseUrl}/rankings/constructors/elo/history/${selectedConstructor1}?season=${selectedYear1}`),
+            fetch(`${baseUrl}/rankings/constructors/elo/history/${selectedConstructor2}?season=${selectedYear2}`)
           ]);
           
           const history1 = await history1Response.json();

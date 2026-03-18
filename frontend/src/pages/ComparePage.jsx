@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import FilterModal from '../components/compare/FilterModal';
+import fastf1Api from '../services/api';
 import ComparisonSummaryStats from '../components/compare/ComparisonSummaryStats';
 import ComparisonEmptyState from '../components/compare/ComparisonEmptyState';
 import ComparisonGraphPlaceholder from '../components/compare/ComparisonGraphPlaceholder';
@@ -28,12 +29,12 @@ export default function ComparePage() {
         setLoading(true);
         
         // Fetch drivers for selected year using the existing endpoint
-        const driverResponse = await fetch(`http://localhost:5001/api/rankings/drivers/elo?season=${selectedYear}`);
+        const driverResponse = await fetch(`${fastf1Api.baseUrl}/rankings/drivers/elo?season=${selectedYear}`);
         const driverData = await driverResponse.json();
         setDrivers(driverData.slice(0, 50)); // Top 50 drivers for dropdown
         
         // Fetch constructors from combined rankings
-        const combinedResponse = await fetch(`http://localhost:5001/api/rankings/combined?season=${selectedYear}`);
+        const combinedResponse = await fetch(`${fastf1Api.baseUrl}/rankings/combined?season=${selectedYear}`);
         const combinedData = await combinedResponse.json();
         const uniqueConstructors = combinedData.reduce((acc, entry) => {
           if (!acc.find(c => c.constructor_id === entry.constructor_id)) {
