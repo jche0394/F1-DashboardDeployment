@@ -1,7 +1,5 @@
 // FastF1 API Service for CRA + Vercel
 
-const BASE_URL = (process.env.REACT_APP_API_URL || '').replace(/\/+$/, ''); // strip trailing slashes
-
 function join(base, path) {
   // ensures exactly one slash between base and path
   return `${base}/${String(path).replace(/^\/+/, '')}`;
@@ -225,4 +223,5 @@ class FastF1ApiService {
   }
 }
 
-export default new FastF1ApiService();
+const fastF1Api = new FastF1ApiService();
+export default fastF1Api;

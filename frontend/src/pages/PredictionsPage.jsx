@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import DashboardCard from '../components/layout/DashboardCard';
 import GPSSelector from '../components/shared/GPSSelector';
@@ -38,14 +38,13 @@ function toDisplayName(raceName) {
 }
 
 const currentYear = new Date().getFullYear();
-const SUPPORTED_YEARS = [currentYear]; // Race predictions only for current season
 
 export default function PredictionsPage() {
   const navigate = useNavigate();
   const [predictions, setPredictions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedYear] = useState(currentYear);
   const [selectedRace, setSelectedRace] = useState(''); // API name (full EventName)
   const [availableRaces, setAvailableRaces] = useState([]); // [{ displayName, apiName }]
   const [checkingRaces, setCheckingRaces] = useState(true);
@@ -79,7 +78,7 @@ export default function PredictionsPage() {
     }
   };
 
-  const fetchPredictions = async () => {
+  const fetchPredictions = useCallback(async () => {
     if (!selectedRace) return;
     try {
       setLoading(true);
@@ -93,7 +92,7 @@ export default function PredictionsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedYear, selectedRace]);
 
   // Load available races when year changes
   useEffect(() => {
@@ -109,7 +108,7 @@ export default function PredictionsPage() {
   // Fetch predictions when race selection changes
   useEffect(() => {
     if (availableRaces.length > 0 && selectedRace) fetchPredictions();
-  }, [selectedRace, availableRaces]);
+  }, [selectedRace, availableRaces, fetchPredictions]);
 
   // === UI states ===
   if (checkingRaces) {

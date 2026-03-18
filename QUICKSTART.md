@@ -189,8 +189,9 @@ F1-Dashboard/
 │   └── api_retrival/
 │       ├── database/
 │       │   └── f1_data.db     📊 Required for ELO data
-│       ├── apis.py            📝 Old file (can delete)
-│       └── predict_race.py    📝 Old file (can delete)
+│       ├── update.py          📡 Used by GitHub Actions for DB updates
+│       ├── get_deg.py         📡 Tire degradation (used by update.py)
+│       └── ...
 ├── frontend/
 │   └── src/
 │       └── services/

@@ -136,13 +136,13 @@ The following files have been consolidated into `app/main.py`:
    - Ergast API endpoints (driver-standings, constructor-standings, etc.)
    - Basic health check
 
-2. **`api_retrival/apis.py`**
+2. **`api_retrival/apis.py`** (consolidated into main.py)
    - Database connection and queries
    - ELO rankings endpoints
    - Driver/constructor comparisons
    - Historical data endpoints
 
-3. **`api_retrival/predict_race.py`**
+3. **`api_retrival/predict_race.py`** (consolidated into main.py)
    - Race prediction algorithm
    - Tire degradation analysis
    - Qualifying data processing
@@ -154,10 +154,10 @@ F1-Dashboard/
 ├── app/
 │   ├── main.py                    # ✅ CONSOLIDATED BACKEND
 │   └── api_retrival/
-│       ├── apis.py                # ⚠️  Still exists but not used
-│       ├── predict_race.py        # ⚠️  Still exists but not used
-│       └── database/
-│           └── f1_data.db         # Required for ELO data
+│       ├── database/
+│       │   └── f1_data.db         # Required for ELO data
+│       ├── update.py              # Used by GitHub Actions
+│       └── ...
 ├── frontend/
 │   └── src/
 │       └── services/
