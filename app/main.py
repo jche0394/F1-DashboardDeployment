@@ -10,6 +10,19 @@ from datetime import datetime
 import sqlite3
 import traceback
 
+try:
+    from app.repositories.driver_repository import DriverRepository
+    from app.repositories.race_repository import RaceRepository
+    from app.repositories.rankings_repository import RankingsRepository
+    from app.repositories.prediction_repository import PredictionRepository
+    from app.repositories.constructor_repository import ConstructorRepository
+except ImportError:
+    from repositories.driver_repository import DriverRepository
+    from repositories.race_repository import RaceRepository
+    from repositories.rankings_repository import RankingsRepository
+    from repositories.prediction_repository import PredictionRepository
+    from repositories.constructor_repository import ConstructorRepository
+
 # Setup FastF1 cache
 os.makedirs("f1_cache", exist_ok=True)
 fastf1.Cache.enable_cache("f1_cache")
@@ -93,18 +106,15 @@ def get_valid_race_names_for_year(year: int):
         return []
 
 
-# ========================================
-# Database Helper Functions
-# ========================================
-def get_db_connection():
-    """Establishes a connection to the SQLite database."""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row 
-    return conn
+driver_repository = DriverRepository(DATABASE_PATH)
+constructor_repository = ConstructorRepository(DATABASE_PATH)
+race_repository = RaceRepository(DATABASE_PATH)
+rankings_repository = RankingsRepository(DATABASE_PATH)
+prediction_repository = PredictionRepository(
+    DATABASE_PATH,
+    available_races_provider=get_valid_race_names_for_year,
+)
 
-def rows_to_dict_list(cursor_rows):
-    """Converts a list of sqlite3.Row objects to a list of dictionaries."""
-    return [dict(row) for row in cursor_rows]
 
 # ========================================
 # Race Prediction Helper Functions
@@ -595,15 +605,7 @@ def get_circuits():
 def get_drivers():
     """Fetches all drivers from the Driver table and returns them as JSON."""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Driver")
-        drivers = cursor.fetchall()
-        conn.close()
-        
-        drivers_list = [dict(row) for row in drivers]
-        
-        return jsonify(drivers_list)
+        return jsonify(driver_repository.get_all_drivers())
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "Failed to retrieve data from the database"}), 500
@@ -643,13 +645,7 @@ def get_constructors():
                 return jsonify({'error': 'No data available'}), 404
         else:
             # Otherwise use database
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM Constructor")
-            constructors = cursor.fetchall()
-            conn.close()
-            
-            return jsonify([dict(row) for row in constructors])
+            return jsonify(constructor_repository.get_all_constructors())
             
     except Exception as e:
         print(f"Error in constructors: {e}")
@@ -659,18 +655,7 @@ def get_constructors():
 def get_driver_race(year):
     """Fetches all driver race data for a specific year."""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        query = "SELECT * From Driver_Race INNER JOIN Race ON Driver_Race.race_id = Race.race_id WHERE year = ?;"
-        cursor.execute(query, (year,))
-
-        drivers = cursor.fetchall()
-        conn.close()
-        
-        drivers_list = [dict(row) for row in drivers]
-        
-        return jsonify(drivers_list)
+        return jsonify(race_repository.get_driver_race_by_year(year))
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "Failed to retrieve data from the database"}), 500
@@ -682,18 +667,7 @@ def get_driver_race(year):
 def get_constructor_race(year):
     """Fetches all constructor race data for a specific year."""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        query = "SELECT * From Constructor_Race INNER JOIN Race ON Constructor_Race.race_id = Race.race_id WHERE year = ?;"
-        cursor.execute(query, (year,))
-        
-        drivers = cursor.fetchall()
-        conn.close()
-        
-        drivers_list = [dict(row) for row in drivers]
-        
-        return jsonify(drivers_list)
+        return jsonify(race_repository.get_constructor_race_by_year(year))
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "Failed to retrieve data from the database"}), 500
@@ -708,39 +682,15 @@ def get_constructor_race(year):
 def compare_drivers(driver1_id, driver2_id):
     """Fetches career stats and latest Elo for two drivers to compare them."""
     try:
-        conn = get_db_connection()
-        
-        query = """
-            SELECT
-                d.first_name,
-                d.last_name,
-                d.country,
-                dr.elo,
-                dr.combined_elo,
-                dr.position,
-                dr.points,
-                r.year,
-                r.round,
-                r.name as race_name
-            FROM Driver d
-            JOIN Driver_Race dr ON d.driver_id = dr.driver_id
-            JOIN Race r ON dr.race_id = r.race_id
-            WHERE d.driver_id = ?
-            ORDER BY r.year DESC, r.round DESC
-            LIMIT 1;
-        """
-        
-        driver1_data = conn.execute(query, (driver1_id,)).fetchone()
-        driver2_data = conn.execute(query, (driver2_id,)).fetchone()
-        
-        conn.close()
+        driver1_data = driver_repository.get_driver_comparison_snapshot(driver1_id)
+        driver2_data = driver_repository.get_driver_comparison_snapshot(driver2_id)
 
         if not driver1_data or not driver2_data:
             return jsonify({"error": "One or both drivers not found"}), 404
 
         response = {
-            "driver1": dict(driver1_data),
-            "driver2": dict(driver2_data)
+            "driver1": driver1_data,
+            "driver2": driver2_data
         }
         
         return jsonify(response)
@@ -754,34 +704,15 @@ def compare_drivers(driver1_id, driver2_id):
 def compare_constructors(constructor1_id, constructor2_id):
     """Fetches latest Elo for two constructors to compare them."""
     try:
-        conn = get_db_connection()
-        
-        query = """
-            SELECT
-                c.name,
-                cr.elo,
-                r.year,
-                r.round,
-                r.name as race_name
-            FROM Constructor c
-            JOIN Constructor_Race cr ON c.constructor_id = cr.constructor_id
-            JOIN Race r ON cr.race_id = r.race_id
-            WHERE c.constructor_id = ?
-            ORDER BY r.year DESC, r.round DESC
-            LIMIT 1;
-        """
-        
-        constructor1_data = conn.execute(query, (constructor1_id,)).fetchone()
-        constructor2_data = conn.execute(query, (constructor2_id,)).fetchone()
-        
-        conn.close()
+        constructor1_data = constructor_repository.get_constructor_comparison_snapshot(constructor1_id)
+        constructor2_data = constructor_repository.get_constructor_comparison_snapshot(constructor2_id)
 
         if not constructor1_data or not constructor2_data:
             return jsonify({"error": "One or both constructors not found"}), 404
 
         response = {
-            "constructor1": dict(constructor1_data),
-            "constructor2": dict(constructor2_data)
+            "constructor1": constructor1_data,
+            "constructor2": constructor2_data
         }
         
         return jsonify(response)
@@ -800,66 +731,8 @@ def get_driver_elo_rankings():
     try:
         year = request.args.get('season', type=int)
         round_num = request.args.get('race', type=int)
-        
-        conn = get_db_connection()
-        
-        if year and round_num:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name, d.code,
-                    c.constructor_id, c.name as constructor_name, dr.elo
-                FROM Driver_Race dr
-                JOIN Driver d ON dr.driver_id = d.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                JOIN Race r ON dr.race_id = r.race_id
-                WHERE r.year = ? AND r.round = ?
-                ORDER BY dr.elo DESC;
-            """
-            drivers = conn.execute(query, (year, round_num)).fetchall()
-        elif year:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name, d.code,
-                    c.constructor_id, c.name as constructor_name, dr.elo
-                FROM
-                    Driver d
-                JOIN
-                    (SELECT
-                        dr.driver_id, dr.constructor_id, dr.elo,
-                        ROW_NUMBER() OVER(PARTITION BY dr.driver_id ORDER BY r.round DESC) as rn
-                     FROM Driver_Race dr
-                     JOIN Race r ON dr.race_id = r.race_id
-                     WHERE r.year = ?) dr ON d.driver_id = dr.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                WHERE
-                    dr.rn = 1
-                ORDER BY
-                    dr.elo DESC;
-            """
-            drivers = conn.execute(query, (year,)).fetchall()
-        else:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name, d.code,
-                    c.constructor_id, c.name as constructor_name, dr.elo
-                FROM
-                    Driver d
-                JOIN
-                    (SELECT
-                        driver_id, constructor_id, elo,
-                        ROW_NUMBER() OVER(PARTITION BY driver_id ORDER BY race_id DESC) as rn
-                     FROM Driver_Race) dr ON d.driver_id = dr.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                WHERE
-                    dr.rn = 1
-                ORDER BY
-                    dr.elo DESC;
-            """
-            drivers = conn.execute(query).fetchall()
-        
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(drivers))
+        drivers = rankings_repository.get_driver_elo_rankings(year, round_num)
+        return jsonify(drivers)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -871,28 +744,8 @@ def get_driver_elo_history(driver_id):
     """Returns the full Elo history for a specific driver."""
     try:
         year_filter = request.args.get('season', type=int)
-        
-        conn = get_db_connection()
-        
-        base_query = """
-            SELECT
-                r.year, r.round, r.name AS race_name, r.date, dr.elo
-            FROM Driver_Race dr
-            JOIN Race r ON dr.race_id = r.race_id
-            WHERE dr.driver_id = ?
-        """
-        params = [driver_id]
-
-        if year_filter:
-            base_query += " AND r.year = ?"
-            params.append(year_filter)
-        
-        base_query += " ORDER BY r.year, r.round;"
-
-        history = conn.execute(base_query, tuple(params)).fetchall()
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(history))
+        history = rankings_repository.get_driver_elo_history(driver_id, year_filter)
+        return jsonify(history)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -905,65 +758,8 @@ def get_combined_elo_rankings():
     try:
         year = request.args.get('season', type=int)
         round_num = request.args.get('race', type=int)
-        
-        conn = get_db_connection()
-        
-        if year and round_num:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name,
-                    c.constructor_id, c.name as constructor_name,
-                    dr.combined_elo
-                FROM Driver_Race dr
-                JOIN Driver d ON dr.driver_id = d.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                JOIN Race r ON dr.race_id = r.race_id
-                WHERE r.year = ? AND r.round = ?
-                ORDER BY dr.combined_elo DESC;
-            """
-            rankings = conn.execute(query, (year, round_num)).fetchall()
-        elif year:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name,
-                    c.constructor_id, c.name as constructor_name,
-                    dr.combined_elo
-                FROM Driver_Race dr
-                JOIN Driver d ON dr.driver_id = d.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                JOIN Race r ON dr.race_id = r.race_id
-                JOIN (
-                    SELECT dr.driver_id, MAX(r.round) as max_round
-                    FROM Driver_Race dr
-                    JOIN Race r ON dr.race_id = r.race_id
-                    WHERE r.year = ?
-                    GROUP BY dr.driver_id
-                ) latest ON dr.driver_id = latest.driver_id AND r.round = latest.max_round
-                WHERE r.year = ?
-                ORDER BY dr.combined_elo DESC;
-            """
-            rankings = conn.execute(query, (year, year)).fetchall()
-        else:
-            query = """
-                SELECT
-                    d.driver_id, d.first_name, d.last_name,
-                    c.constructor_id, c.name as constructor_name,
-                    dr.combined_elo
-                FROM Driver_Race dr
-                JOIN Driver d ON dr.driver_id = d.driver_id
-                JOIN Constructor c ON dr.constructor_id = c.constructor_id
-                JOIN (
-                    SELECT driver_id, MAX(race_id) as max_race_id
-                    FROM Driver_Race
-                    GROUP BY driver_id
-                ) latest ON dr.driver_id = latest.driver_id AND dr.race_id = latest.max_race_id
-                ORDER BY dr.combined_elo DESC;
-            """
-            rankings = conn.execute(query).fetchall()
-        
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(rankings))
+        rankings = rankings_repository.get_combined_rankings(year, round_num)
+        return jsonify(rankings)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -977,13 +773,7 @@ def get_combined_elo_rankings():
 def get_available_years():
     """Returns all available years in the database."""
     try:
-        conn = get_db_connection()
-        query = "SELECT DISTINCT year FROM Race ORDER BY year DESC;"
-        years = conn.execute(query).fetchall()
-        conn.close()
-        
-        years_list = [row['year'] for row in years]
-        return jsonify(years_list)
+        return jsonify(race_repository.get_available_years())
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -1008,20 +798,8 @@ def get_constructor_elo_by_race_query():
 def get_elo_for_drivers_in_race(year, round_num):
     """Returns the Elo for all drivers in a specific race."""
     try:
-        conn = get_db_connection()
-        query = """
-            SELECT
-                d.driver_id, d.first_name, d.last_name, d.code, dr.elo
-            FROM Driver_Race dr
-            JOIN Driver d ON dr.driver_id = d.driver_id
-            JOIN Race r ON dr.race_id = r.race_id
-            WHERE r.year = ? AND r.round = ?
-            ORDER BY dr.elo DESC;
-        """
-        drivers = conn.execute(query, (year, round_num)).fetchall()
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(drivers))
+        drivers = rankings_repository.get_driver_elo_for_race(year, round_num)
+        return jsonify(drivers)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -1032,20 +810,8 @@ def get_elo_for_drivers_in_race(year, round_num):
 def get_elo_for_constructors_in_race(year, round_num):
     """Returns the Elo for all constructors in a specific race."""
     try:
-        conn = get_db_connection()
-        query = """
-            SELECT
-                c.constructor_id, c.name, cr.elo
-            FROM Constructor_Race cr
-            JOIN Constructor c ON cr.constructor_id = c.constructor_id
-            JOIN Race r ON cr.race_id = r.race_id
-            WHERE r.year = ? AND r.round = ?
-            ORDER BY cr.elo DESC;
-        """
-        constructors = conn.execute(query, (year, round_num)).fetchall()
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(constructors))
+        constructors = rankings_repository.get_constructor_elo_rankings(year, round_num)
+        return jsonify(constructors)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -1056,23 +822,8 @@ def get_elo_for_constructors_in_race(year, round_num):
 def get_combined_elo_for_race(year, round_num):
     """Returns the combined driver-constructor Elo for a specific race."""
     try:
-        conn = get_db_connection()
-        query = """
-            SELECT
-                d.driver_id, d.first_name, d.last_name,
-                c.constructor_id, c.name as constructor_name,
-                dr.combined_elo
-            FROM Driver_Race dr
-            JOIN Driver d ON dr.driver_id = d.driver_id
-            JOIN Constructor c ON dr.constructor_id = c.constructor_id
-            JOIN Race r ON dr.race_id = r.race_id
-            WHERE r.year = ? AND r.round = ?
-            ORDER BY dr.combined_elo DESC;
-        """
-        results = conn.execute(query, (year, round_num)).fetchall()
-        conn.close()
-        
-        return jsonify(rows_to_dict_list(results))
+        results = rankings_repository.get_combined_elo_for_race(year, round_num)
+        return jsonify(results)
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -1089,7 +840,7 @@ def get_available_races(year):
         current_year = get_current_year()
         if year != current_year:
             return jsonify({"error": f"Race predictions are only available for the current season ({current_year})"}), 400
-        races = get_valid_race_names_for_year(year)
+        races = prediction_repository.get_available_races(year)
         return jsonify(races)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1135,6 +886,14 @@ def race_predict():
             return jsonify({
                 "error": f"Invalid race name '{gp_name}'. Valid {year} races: {', '.join(valid_races)}"
             }), 400
+
+        cached_prediction = prediction_repository.get_predictions(year, gp_name)
+        if cached_prediction:
+            return jsonify({
+                "year": cached_prediction["year"],
+                "gp_name": cached_prediction["gp_name"],
+                "predictions": cached_prediction["predictions"],
+            })
         
         # Fetch qualifying times
         qualifying_times, error = get_qualifying_times_for_prediction(year, gp_name)
@@ -1167,6 +926,8 @@ def race_predict():
                 "prediction_method": str(row.get("PredictionMethod", "qualifying_only")),
                 "constructor_name": str(row.get("TeamName")) if pd.notna(row.get("TeamName")) else None
             })
+
+        prediction_repository.save_predictions(year, gp_name, predictions_list)
         
         return jsonify({
             "year": year,
