@@ -3,12 +3,8 @@ from flask_cors import CORS
 import fastf1
 import fastf1.ergast
 import os
-import json
-import pandas as pd
-import numpy as np
 from datetime import datetime
 import sqlite3
-import traceback
 
 try:
     from app.repositories.driver_repository import DriverRepository
@@ -16,12 +12,20 @@ try:
     from app.repositories.rankings_repository import RankingsRepository
     from app.repositories.prediction_repository import PredictionRepository
     from app.repositories.constructor_repository import ConstructorRepository
+    from app.services.comparison_service import ComparisonService
+    from app.services.prediction_service import PredictionService
+    from app.services.race_service import RaceService
+    from app.services.rankings_service import RankingsService
 except ImportError:
     from repositories.driver_repository import DriverRepository
     from repositories.race_repository import RaceRepository
     from repositories.rankings_repository import RankingsRepository
     from repositories.prediction_repository import PredictionRepository
     from repositories.constructor_repository import ConstructorRepository
+    from services.comparison_service import ComparisonService
+    from services.prediction_service import PredictionService
+    from services.race_service import RaceService
+    from services.rankings_service import RankingsService
 
 # Setup FastF1 cache
 os.makedirs("f1_cache", exist_ok=True)
@@ -71,25 +75,6 @@ def get_current_year():
 # ========================================
 # Dynamic race validation (multi-year support)
 # ========================================
-def _gp_name_matches(gp_name: str, valid_races: list) -> bool:
-    """Check if gp_name matches any valid race (exact or common variants like 'X Grand Prix')."""
-    if not gp_name or not valid_races:
-        return False
-    gp = gp_name.strip()
-    valid_set = {str(v).strip() for v in valid_races}
-    if gp in valid_set:
-        return True
-    # "Bahrain Grand Prix" matches valid "Bahrain"
-    normalized = gp.replace(" Grand Prix", "").strip()
-    if normalized in valid_set:
-        return True
-    # "Bahrain" matches valid "Bahrain Grand Prix"
-    for v in valid_set:
-        if v + " Grand Prix" == gp or v == gp:
-            return True
-    return False
-
-
 def get_valid_race_names_for_year(year: int):
     """Fetch valid race/event names. Returns EventName only, one per round. Never Location or Country."""
     try:
@@ -115,227 +100,16 @@ prediction_repository = PredictionRepository(
     available_races_provider=get_valid_race_names_for_year,
 )
 
+rankings_service = RankingsService(rankings_repository)
+race_service = RaceService(race_repository)
+comparison_service = ComparisonService(driver_repository, constructor_repository)
+prediction_service = PredictionService(
+    prediction_repository,
+    driver_code_to_name=driver_code_to_name,
+    get_current_year=get_current_year,
+    valid_races_provider=get_valid_race_names_for_year,
+)
 
-# ========================================
-# Race Prediction Helper Functions
-# ========================================
-def load_session(year: int, gp_name: str, kind: str):
-    """Load a FastF1 session"""
-    sess = fastf1.get_session(year, gp_name, kind)
-    sess.load()
-    return sess
-
-def get_qualifying_times_for_prediction(year: int, gp_name: str):
-    """Fetch qualifying times from FastF1"""
-    try:
-        sess = load_session(year, gp_name, "Q")
-        results = sess.results
-        
-        if results is None or len(results) == 0:
-            return None, "Qualifying data is not available yet. The qualifying session may not have occurred."
-        
-        qual_data = []
-        for _, row in results.iterrows():
-            driver_code = row.get("Abbreviation")
-            q3_time = row.get("Q3")
-            q2_time = row.get("Q2")
-            q1_time = row.get("Q1")
-            
-            best_time = q3_time if pd.notna(q3_time) else (q2_time if pd.notna(q2_time) else q1_time)
-            
-            if pd.notna(best_time) and driver_code:
-                driver_name = row.get("FullName") if pd.notna(row.get("FullName")) else driver_code_to_name.get(driver_code, driver_code)
-                team_name = row.get("TeamName") if pd.notna(row.get("TeamName")) else None
-                qual_data.append({
-                    "Driver": driver_name,
-                    "DriverCode": driver_code,
-                    "QualifyingTime (s)": best_time.total_seconds(),
-                    "TeamName": team_name
-                })
-        
-        if len(qual_data) == 0:
-            return None, "No valid qualifying times found. The qualifying session may not have occurred yet."
-        
-        df = pd.DataFrame(qual_data)
-        df = df.sort_values("QualifyingTime (s)").reset_index(drop=True)
-        df["QualifyingPosition"] = df.index + 1
-        
-        return df, None
-    
-    except Exception as e:
-        error_msg = str(e).lower()
-        
-        if "cannot find" in error_msg or "no round" in error_msg or "invalid event" in error_msg or "not found" in error_msg or "no session" in error_msg:
-            return None, f"Circuit or race '{gp_name}' does not exist in {year}. Please check the race name is correct."
-        else:
-            return None, f"Unable to load qualifying data: {str(e)}"
-
-def calculate_tire_degradation(year: int, gp_name: str):
-    """Calculate tire degradation rate from practice sessions or sprint race"""
-    # Try sprint race first
-    try:
-        sprint = load_session(year, gp_name, "S")
-        return calculate_deg_from_session(sprint, is_sprint=True)
-    except:
-        pass
-    
-    # Try FP2
-    try:
-        fp2 = load_session(year, gp_name, "FP2")
-        return calculate_deg_from_session(fp2, is_sprint=False)
-    except:
-        pass
-    
-    # Fall back to FP3
-    try:
-        fp3 = load_session(year, gp_name, "FP3")
-        return calculate_deg_from_session(fp3, is_sprint=False)
-    except:
-        return pd.DataFrame(columns=['DriverCode', 'AvgDegPerLap'])
-
-def calculate_deg_from_session(session, is_sprint: bool):
-    """Calculate degradation from a session (practice or sprint)"""
-    laps = session.laps.copy()
-    
-    # Build driver number/id -> abbreviation map so deg_data uses same codes as qualifying
-    driver_to_abbr = {}
-    if hasattr(session, "results") and session.results is not None and len(session.results) > 0:
-        for _, row in session.results.iterrows():
-            num = row.get("DriverNumber")
-            abbr = row.get("Abbreviation")
-            if pd.notna(num) and pd.notna(abbr):
-                driver_to_abbr[str(num)] = str(abbr)
-                driver_to_abbr[int(num)] = str(abbr)
-    
-    def to_driver_code(driver_id):
-        if driver_id in driver_to_abbr:
-            return driver_to_abbr[driver_id]
-        if str(driver_id) in driver_to_abbr:
-            return driver_to_abbr[str(driver_id)]
-        return driver_id  # fallback: already abbreviation in some FastF1 versions
-    
-    if not is_sprint:
-        race_compounds = ['MEDIUM', 'HARD']
-        laps = laps[laps['Compound'].isin(race_compounds)]
-    
-    laps = laps[pd.notna(laps['LapTime'])]
-    laps['LapTime (s)'] = laps['LapTime'].dt.total_seconds()
-    
-    # Prefer DriverNumber (reliable) over Driver (may be number or abbreviation depending on FastF1 version)
-    driver_col = "DriverNumber" if "DriverNumber" in laps.columns else "Driver"
-    
-    deg_data = []
-    min_stint_length = 5 if is_sprint else 7
-    
-    for driver_id in laps[driver_col].unique():
-        driver_code = to_driver_code(driver_id)
-        driver_laps = laps[laps[driver_col] == driver_id].copy()
-        
-        for stint in driver_laps['Stint'].unique():
-            stint_laps = driver_laps[driver_laps['Stint'] == stint].sort_values('LapNumber')
-            
-            if len(stint_laps) >= min_stint_length:
-                if is_sprint:
-                    usable_laps = stint_laps.iloc[1:]
-                else:
-                    usable_laps = stint_laps.iloc[1:-1]
-                
-                if len(usable_laps) >= 6:
-                    early_laps = usable_laps.iloc[:3]['LapTime (s)'].mean()
-                    late_laps = usable_laps.iloc[-3:]['LapTime (s)'].mean()
-                    
-                    num_laps = len(usable_laps) - 3
-                    deg_per_lap = (late_laps - early_laps) / num_laps if num_laps > 0 else 0
-                    
-                    deg_data.append({
-                        'DriverCode': driver_code,
-                        'DegPerLap': deg_per_lap,
-                        'StintLength': len(usable_laps),
-                        'Compound': stint_laps.iloc[0]['Compound'] if 'Compound' in stint_laps.columns else 'UNKNOWN'
-                    })
-    
-    if len(deg_data) == 0:
-        return pd.DataFrame(columns=['DriverCode', 'AvgDegPerLap'])
-    
-    deg_df = pd.DataFrame(deg_data)
-    avg_deg = deg_df.groupby('DriverCode')['DegPerLap'].mean().reset_index()
-    avg_deg.columns = ['DriverCode', 'AvgDegPerLap']
-    
-    return avg_deg
-
-def predict_race_positions(year: int, gp_name: str, qualifying_times: pd.DataFrame):
-    """Predict race finishing positions based on qualifying + tire degradation"""
-    deg_data = calculate_tire_degradation(year, gp_name)
-    
-    predictions = qualifying_times.merge(deg_data, on='DriverCode', how='left')
-    predictions['HasDegData'] = predictions['DriverCode'].isin(deg_data['DriverCode'])
-    
-    if len(deg_data) > 0 and predictions['HasDegData'].sum() > 0:
-        drivers_with_deg = predictions[predictions['HasDegData']].copy()
-        median_deg = drivers_with_deg['AvgDegPerLap'].median()
-        
-        predictions['RelativeDeg'] = predictions['AvgDegPerLap'] - median_deg
-        
-        if predictions['HasDegData'].sum() >= 4:
-            deg_25th = drivers_with_deg['AvgDegPerLap'].quantile(0.25)
-            deg_75th = drivers_with_deg['AvgDegPerLap'].quantile(0.75)
-            
-            def calculate_position_adjustment(row):
-                if not row['HasDegData']:
-                    return 0
-                
-                deg = row['AvgDegPerLap']
-                
-                if deg <= deg_25th:
-                    improvement = (deg_25th - deg) / (median_deg - deg_25th) if median_deg != deg_25th else 1
-                    return -min(3, max(1, int(improvement * 3)))
-                
-                elif deg >= deg_75th:
-                    decline = (deg - deg_75th) / (deg_75th - median_deg) if deg_75th != median_deg else 1
-                    return min(3, max(1, int(decline * 3)))
-                
-                else:
-                    return 0
-            
-            predictions['PositionAdjustment'] = predictions.apply(calculate_position_adjustment, axis=1)
-        else:
-            predictions['PositionAdjustment'] = 0
-            predictions.loc[predictions['HasDegData'], 'PositionAdjustment'] = predictions.loc[
-                predictions['HasDegData'], 'RelativeDeg'
-            ].apply(lambda x: min(2, max(-2, int(x * 10))))
-    else:
-        predictions['AvgDegPerLap'] = None
-        predictions['RelativeDeg'] = 0
-        predictions['PositionAdjustment'] = 0
-    
-    predictions['PredictedRacePosition'] = predictions['QualifyingPosition'] + predictions['PositionAdjustment']
-    predictions['PredictedRacePosition'] = predictions['PredictedRacePosition'].clip(
-        lower=predictions['QualifyingPosition'] - 3,
-        upper=predictions['QualifyingPosition'] + 3
-    )
-    
-    predictions['PredictedRacePosition'] = predictions['PredictedRacePosition'].clip(1, len(predictions))
-    
-    predictions = predictions.sort_values(['PredictedRacePosition', 'QualifyingPosition']).reset_index(drop=True)
-    
-    seen_positions = {}
-    for idx, row in predictions.iterrows():
-        pos = int(row['PredictedRacePosition'])
-        if pos in seen_positions:
-            while pos in seen_positions and pos <= len(predictions):
-                pos += 1
-            predictions.at[idx, 'PredictedRacePosition'] = pos
-        seen_positions[pos] = True
-    
-    predictions = predictions.sort_values('PredictedRacePosition').reset_index(drop=True)
-    predictions['PredictedRacePosition'] = predictions.index + 1
-    
-    predictions['PredictionMethod'] = predictions.apply(
-        lambda row: 'qualifying_and_tire_deg' if row['HasDegData'] else 'qualifying_only',
-        axis=1
-    )
-    
-    return predictions
 
 # ========================================
 # Health Check
@@ -353,7 +127,12 @@ def health_check():
         'message': 'F1 Dashboard API - Combined Backend',
         'endpoints': {
             'ergast': ['/api/driver-standings', '/api/constructor-standings', '/api/season-schedule'],
-            'database': ['/api/drivers', '/api/rankings/drivers/elo', '/api/comparisons'],
+            'database': [
+                '/api/drivers',
+                '/api/rankings/drivers/elo',
+                '/api/drivers/compare/<id1>/<id2>',
+                '/api/constructors/compare/<id1>/<id2>',
+            ],
             'predictions': ['/api/available_races/<year>', '/api/race_predict']
         }
     })
@@ -655,7 +434,7 @@ def get_constructors():
 def get_driver_race(year):
     """Fetches all driver race data for a specific year."""
     try:
-        return jsonify(race_repository.get_driver_race_by_year(year))
+        return jsonify(race_service.get_driver_race_by_year(year))
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "Failed to retrieve data from the database"}), 500
@@ -667,7 +446,7 @@ def get_driver_race(year):
 def get_constructor_race(year):
     """Fetches all constructor race data for a specific year."""
     try:
-        return jsonify(race_repository.get_constructor_race_by_year(year))
+        return jsonify(race_service.get_constructor_race_by_year(year))
     except sqlite3.Error as e:
         print(f"Database error: {e}")
         return jsonify({"error": "Failed to retrieve data from the database"}), 500
@@ -682,17 +461,9 @@ def get_constructor_race(year):
 def compare_drivers(driver1_id, driver2_id):
     """Fetches career stats and latest Elo for two drivers to compare them."""
     try:
-        driver1_data = driver_repository.get_driver_comparison_snapshot(driver1_id)
-        driver2_data = driver_repository.get_driver_comparison_snapshot(driver2_id)
-
-        if not driver1_data or not driver2_data:
+        response = comparison_service.compare_drivers(driver1_id, driver2_id)
+        if not response:
             return jsonify({"error": "One or both drivers not found"}), 404
-
-        response = {
-            "driver1": driver1_data,
-            "driver2": driver2_data
-        }
-        
         return jsonify(response)
         
     except sqlite3.Error as e:
@@ -704,17 +475,9 @@ def compare_drivers(driver1_id, driver2_id):
 def compare_constructors(constructor1_id, constructor2_id):
     """Fetches latest Elo for two constructors to compare them."""
     try:
-        constructor1_data = constructor_repository.get_constructor_comparison_snapshot(constructor1_id)
-        constructor2_data = constructor_repository.get_constructor_comparison_snapshot(constructor2_id)
-
-        if not constructor1_data or not constructor2_data:
+        response = comparison_service.compare_constructors(constructor1_id, constructor2_id)
+        if not response:
             return jsonify({"error": "One or both constructors not found"}), 404
-
-        response = {
-            "constructor1": constructor1_data,
-            "constructor2": constructor2_data
-        }
-        
         return jsonify(response)
 
     except sqlite3.Error as e:
@@ -725,13 +488,27 @@ def compare_constructors(constructor1_id, constructor2_id):
 # ========================================
 # Ranking & History Endpoints
 # ========================================
+def _ranking_query_kwargs():
+    """Optional filters: min_elo, q|search, sort (elo|name|code), order (asc|desc)."""
+    min_elo = request.args.get("min_elo", type=int)
+    search = request.args.get("q") or request.args.get("search")
+    sort_by = request.args.get("sort", "elo")
+    descending = request.args.get("order", "desc").lower() != "asc"
+    return {
+        "min_elo": min_elo,
+        "search": search,
+        "sort_by": sort_by,
+        "descending": descending,
+    }
+
+
 @app.route('/api/rankings/drivers/elo', methods=['GET'])
 def get_driver_elo_rankings():
     """Returns the latest Elo score for every driver, ranked highest to lowest."""
     try:
         year = request.args.get('season', type=int)
         round_num = request.args.get('race', type=int)
-        drivers = rankings_repository.get_driver_elo_rankings(year, round_num)
+        drivers = rankings_service.get_driver_elo_rankings(year, round_num, **_ranking_query_kwargs())
         return jsonify(drivers)
 
     except sqlite3.Error as e:
@@ -744,7 +521,7 @@ def get_driver_elo_history(driver_id):
     """Returns the full Elo history for a specific driver."""
     try:
         year_filter = request.args.get('season', type=int)
-        history = rankings_repository.get_driver_elo_history(driver_id, year_filter)
+        history = rankings_service.get_driver_elo_history(driver_id, year_filter)
         return jsonify(history)
 
     except sqlite3.Error as e:
@@ -758,7 +535,10 @@ def get_combined_elo_rankings():
     try:
         year = request.args.get('season', type=int)
         round_num = request.args.get('race', type=int)
-        rankings = rankings_repository.get_combined_rankings(year, round_num)
+        kw = _ranking_query_kwargs()
+        if kw.get("sort_by") == "elo":
+            kw = {**kw, "sort_by": "combined_elo"}
+        rankings = rankings_service.get_combined_rankings(year, round_num, **kw)
         return jsonify(rankings)
 
     except sqlite3.Error as e:
@@ -773,7 +553,7 @@ def get_combined_elo_rankings():
 def get_available_years():
     """Returns all available years in the database."""
     try:
-        return jsonify(race_repository.get_available_years())
+        return jsonify(race_service.get_available_years())
 
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -798,7 +578,9 @@ def get_constructor_elo_by_race_query():
 def get_elo_for_drivers_in_race(year, round_num):
     """Returns the Elo for all drivers in a specific race."""
     try:
-        drivers = rankings_repository.get_driver_elo_for_race(year, round_num)
+        drivers = rankings_service.get_driver_elo_for_race(
+            year, round_num, **_ranking_query_kwargs()
+        )
         return jsonify(drivers)
 
     except sqlite3.Error as e:
@@ -810,7 +592,9 @@ def get_elo_for_drivers_in_race(year, round_num):
 def get_elo_for_constructors_in_race(year, round_num):
     """Returns the Elo for all constructors in a specific race."""
     try:
-        constructors = rankings_repository.get_constructor_elo_rankings(year, round_num)
+        constructors = rankings_service.get_constructor_elo_rankings(
+            year, round_num, **_ranking_query_kwargs()
+        )
         return jsonify(constructors)
 
     except sqlite3.Error as e:
@@ -822,7 +606,10 @@ def get_elo_for_constructors_in_race(year, round_num):
 def get_combined_elo_for_race(year, round_num):
     """Returns the combined driver-constructor Elo for a specific race."""
     try:
-        results = rankings_repository.get_combined_elo_for_race(year, round_num)
+        kw = _ranking_query_kwargs()
+        if kw.get("sort_by") == "elo":
+            kw = {**kw, "sort_by": "combined_elo"}
+        results = rankings_service.get_combined_elo_for_race(year, round_num, **kw)
         return jsonify(results)
 
     except sqlite3.Error as e:
@@ -837,10 +624,9 @@ def get_combined_elo_for_race(year, round_num):
 def get_available_races(year):
     """Return race/event names for the current year from FastF1 schedule."""
     try:
-        current_year = get_current_year()
-        if year != current_year:
-            return jsonify({"error": f"Race predictions are only available for the current season ({current_year})"}), 400
-        races = prediction_repository.get_available_races(year)
+        races, err = prediction_service.get_available_races(year)
+        if err:
+            return jsonify({"error": err}), 400
         return jsonify(races)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -863,85 +649,18 @@ def race_predict():
     3. Calculates tire degradation rate per driver from long runs
     4. Predicts race positions by adjusting qualifying order based on tire management
     """
-    try:
-        year = request.args.get('year', type=int)
-        gp_name = request.args.get('gp_name')
-        
-        if not year or not gp_name:
-            return jsonify({"error": "Both 'year' and 'gp_name' parameters are required"}), 400
-        
-        # Only current year supported
-        current_year = get_current_year()
-        if year != current_year:
-            return jsonify({
-                "error": f"Race predictions are only available for the current season ({current_year})"
-            }), 400
-        
-        # Validate race name against schedule for this year
-        valid_races = get_valid_race_names_for_year(year)
-        if not valid_races:
-            return jsonify({"error": f"Could not load schedule for {year}. Year may be unsupported."}), 400
-        
-        if not _gp_name_matches(gp_name, valid_races):
-            return jsonify({
-                "error": f"Invalid race name '{gp_name}'. Valid {year} races: {', '.join(valid_races)}"
-            }), 400
-
-        cached_prediction = prediction_repository.get_predictions(year, gp_name)
-        if cached_prediction:
-            return jsonify({
-                "year": cached_prediction["year"],
-                "gp_name": cached_prediction["gp_name"],
-                "predictions": cached_prediction["predictions"],
-            })
-        
-        # Fetch qualifying times
-        qualifying_times, error = get_qualifying_times_for_prediction(year, gp_name)
-        
-        if error:
-            return jsonify({"error": error}), 404
-        
-        if len(qualifying_times) == 0:
-            return jsonify({
-                "error": f"No qualifying data found for {year} {gp_name}. Please try a different race or check if the race has occurred."
-            }), 404
-        
-        # Generate predictions
-        predictions_df = predict_race_positions(year, gp_name, qualifying_times)
-        
-        # Format response (defensive: handle NaN/missing cols)
-        predictions_list = []
-        for idx, row in predictions_df.iterrows():
-            q_time = row.get("QualifyingTime (s)")
-            pred_pos = row.get("PredictedRacePosition")
-            deg = row.get("AvgDegPerLap")
-            predictions_list.append({
-                "position": int(idx) + 1,
-                "driver": str(row.get("Driver", "")),
-                "driver_code": str(row.get("DriverCode", "")),
-                "qualifying_time": round(float(q_time), 3) if pd.notna(q_time) else None,
-                "qualifying_position": int(row.get("QualifyingPosition", 0)),
-                "predicted_race_position": int(pred_pos) if pd.notna(pred_pos) else int(idx) + 1,
-                "tire_deg_rate": round(float(deg), 4) if pd.notna(deg) else None,
-                "prediction_method": str(row.get("PredictionMethod", "qualifying_only")),
-                "constructor_name": str(row.get("TeamName")) if pd.notna(row.get("TeamName")) else None
-            })
-
-        prediction_repository.save_predictions(year, gp_name, predictions_list)
-        
-        return jsonify({
-            "year": year,
-            "gp_name": gp_name,
-            "predictions": predictions_list
-        })
-    
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f"Error in race prediction: {e}\n{tb}")
-        resp = {"error": f"Error generating predictions: {str(e)}"}
-        if os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes"):
-            resp["detail"] = tb
-        return jsonify(resp), 500
+    year = request.args.get('year', type=int)
+    gp_name = request.args.get('gp_name')
+    flask_debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+    body, err, status, detail = prediction_service.get_predictions_payload_safe(
+        year, gp_name, flask_debug=flask_debug
+    )
+    if err:
+        resp = {"error": err}
+        if detail:
+            resp["detail"] = detail
+        return jsonify(resp), status
+    return jsonify(body)
 
 # ========================================
 # 404 Handler - Return JSON so frontend doesn't get "Unexpected token '<'"
